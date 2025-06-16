@@ -2,29 +2,49 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
-export default function Login() {
+function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const login = async () => {
+  const handleLogin = async (e) => {
+    e.preventDefault(); // Important for form
     try {
-      const res = await axios.post('http://localhost:5000/login', { username, password });
-      alert('🔓 Login successful!');
-      localStorage.setItem('token', res.data.token);
+      const res = await axios.post('http://localhost:5000/login', {
+        username,
+        password,
+      });
+
+      const token = res.data.token;
+      console.log('✅ Received token:', token);
+      localStorage.setItem('token', token);
+
       navigate('/dashboard');
     } catch (err) {
-      alert(`❌ Login failed: ${err.response?.data?.error || err.message}`);
+      console.error('❌ Login failed:', err);
+      setError('Invalid credentials');
     }
   };
 
   return (
-    <div>
-      <h2>🔐 Login</h2>
-      <input placeholder="Username" onChange={e => setUsername(e.target.value)} />
-      <input placeholder="Password" type="password" onChange={e => setPassword(e.target.value)} />
-      <button onClick={login}>Login</button>
-      <p>Need an account? <a href="/register">Register</a></p>
-    </div>
+    <form onSubmit={handleLogin}>
+      <input
+        type="text"
+        placeholder="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <input
+        type="password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <button type="submit">Login</button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </form>
   );
 }
+
+export default Login;

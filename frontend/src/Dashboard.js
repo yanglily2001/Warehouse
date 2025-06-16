@@ -8,18 +8,52 @@ export default function Dashboard() {
   const [quantity, setQuantity] = useState('');
   const [description, setDescription] = useState('');
   const navigate = useNavigate();
+  const [error, setError] = useState('');
 
-  const token = localStorage.getItem('token');
+  console.log('🔐 Token from localStorage:', localStorage.getItem('token'));
 
   const fetchItems = async () => {
-    const res = await axios.get('http://localhost:5000/items');
+    const token = localStorage.getItem('token');
+    const res = await axios.get('http://localhost:5000/items', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
     setItems(res.data.items);
   };
-
+  
+  const token = localStorage.getItem('token');
+  console.log('Token:', token);
   const addItem = async () => {
-    await axios.post('http://localhost:5000/items', { token, name, quantity, description });
-    fetchItems();
+    const token = localStorage.getItem('token');
+    console.log('Adding item with token:', token); // this should NOT be undefined
+  
+    try {
+      const res = await axios.post('http://localhost:5000/items', {
+        name,
+        quantity,
+        description
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+  
+      console.log('Item added:', res.data);
+    } catch (err) {
+      console.error('❌ Failed to add item:', err);
+    }
   };
+
+  axios.get('http://localhost:5000/items', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  .then(res => {
+    console.log('Items:', res.data.items);
+  })
+  .catch(err => {
+    console.error('Fetch items failed:', err.response?.data || err.message);
+  });
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -28,9 +62,16 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (!token) navigate('/login');
-    fetchItems();
-  }, []);
+    const token = localStorage.getItem('token');
+    console.log('📦 Dashboard loaded with token:', token);
+  
+    if (!token) {
+      alert('No token found. Redirecting to login.');
+      navigate('/login');
+    } else {
+      fetchItems();
+    }
+  }, [navigate]);
 
   return (
     <div>
