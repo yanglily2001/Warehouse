@@ -5,26 +5,13 @@
 // node server.js
 import dotenv from 'dotenv';
 dotenv.config();
-
 import mongoose from 'mongoose';
 import express from 'express';
 import cors from 'cors';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcryptjs'; 
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import jwt from 'jsonwebtoken';
-
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log("🔥 Connected to MongoDB Atlas!"))
-  .catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
-    process.exit(1);
-  });
 
 const UserSchema = new mongoose.Schema({
   username: String,
@@ -41,101 +28,132 @@ const ItemSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Item = mongoose.model('Item', ItemSchema);
 
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Connect to MongoDB
+const options = {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+};
+mongoose.connect(process.env.MONGO_URI, options)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
+
+// Middleware
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+app.use(express.json());
+
+// JWT authentication middleware
 const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.split(' ')[1]
+    : null;
 
-  if (!token) return res.status(401).json({ message: 'No token' });
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Token missing' });
+  }
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ message: 'Invalid token' });
-    req.user = user;
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) {
+      console.error('JWT verification failed:', err);
+      return res.status(403).json({ error: 'Forbidden: Invalid token' });
+    }
+    req.user = decoded;
     next();
   });
 };
 
-app.use(cors({
-  origin: 'http://localhost:3000',
-  credentials: true
-}));
-app.use(express.json());
-app.use(session({
-  secret: 'yourSecret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: 'lax',
-  }
-}));
+// Routes
 
-
+// User registration
 app.post('/register', async (req, res) => {
-  const { username, password } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  await User.create({ username, password: hashedPassword });
-  res.json({ status: 'ok' });
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
+
+    const existing = await User.findOne({ username });
+    if (existing) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    await User.create({ username, password: hashed });
+    res.json({ message: 'User registered' });
+  } catch (err) {
+    console.error('Registration error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
+// User login
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  const user = await User.findOne({ username });
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(400).json({ error: 'Invalid credentials' });
-  }
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password required' });
+    }
 
-  // Generate and send a JWT
-  const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET, {
-    expiresIn: '1d'
-  });
+    const user = await User.findOne({ username });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(400).json({ error: 'Invalid credentials' });
+    }
 
-  res.json({ message: 'Logged in', token });
-});
+    const token = jwt.sign(
+      { username: user.username },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
 
-app.post('/logout', (req, res) => {
-  req.session.destroy(err => {
-    if (err) return res.status(500).json({ error: 'Logout failed' });
-    res.clearCookie('connect.sid');
-    res.json({ message: 'Logged out' });
-  });
-});
-
-app.get('/session', (req, res) => {
-  if (req.session.user) {
-    res.json({ user: req.session.user });
-  } else {
-    res.status(401).json({ error: 'Not logged in' });
+    res.json({ message: 'Logged in', token });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.post('/items', authMiddleware, async (req, res) => {
-  if (!req.session.user) return res.status(401).json({ error: 'Unauthorized' });
-  const { name, quantity, description } = req.body;
-  const item = await Item.create({ name, quantity, description, createdBy: req.session.user.username });
-  res.json({ item });
-});
-
+// Get items for authenticated user
 app.get('/items', authMiddleware, async (req, res) => {
   try {
     const items = await Item.find({ createdBy: req.user.username });
     res.json({ items });
   } catch (err) {
-    console.error('Error fetching items:', err);
+    console.error('Fetch items error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('Hello World! 🌍✨');
+// Add new item
+app.post('/items', authMiddleware, async (req, res) => {
+  try {
+    const { name, quantity, description } = req.body;
+    if (!name || !quantity) {
+      return res.status(400).json({ error: 'Name and quantity required' });
+    }
+
+    const item = new Item({
+      name,
+      quantity,
+      description,
+      createdBy: req.user.username,
+    });
+    await item.save();
+
+    res.json({ item });
+  } catch (err) {
+    console.error('Add item error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
+// Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} 🚀`);
+  console.log(`Server listening on port ${PORT}`);
 });
-
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-  next();
-});
-
